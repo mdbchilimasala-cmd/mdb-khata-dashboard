@@ -1,5 +1,5 @@
 import { GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import { ref, set } from "firebase/database";
+import { ref, update } from "firebase/database";
 import { auth, db } from "./config";
 
 const provider = new GoogleAuthProvider();
@@ -7,7 +7,9 @@ const provider = new GoogleAuthProvider();
 export async function loginWithGoogle() {
   const result = await signInWithPopup(auth, provider);
   const user = result.user;
-  await set(ref(db, `users/${user.uid}`), {
+  // Merge profile only — do not use set() here: it would replace the entire
+  // users/{uid} node and delete customers, invoices, transactions, etc.
+  await update(ref(db, `users/${user.uid}`), {
     uid: user.uid,
     displayName: user.displayName || "",
     email: user.email || "",
