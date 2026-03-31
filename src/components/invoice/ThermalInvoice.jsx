@@ -20,15 +20,23 @@ export function ThermalInvoice({ invoice, printSignal = 0 }) {
   const customerLabel = String(invoice?.customerName || "").trim() || "CUSTOMER";
   const displayInvoiceNo = String(invoice?.invoiceNo || "").replace(/^INV-/i, "");
 
+  const SLIP_WIDTH = 62;
+  const centerLine = (s) => {
+    const t = String(s);
+    if (t.length >= SLIP_WIDTH) return t.slice(0, SLIP_WIDTH);
+    const pad = Math.floor((SLIP_WIDTH - t.length) / 2);
+    return " ".repeat(pad) + t;
+  };
+
   const txt = (v, w) => String(v ?? "").slice(0, w).padEnd(w, " ");
   const num = (v, w) => String(v ?? "").slice(0, w).padStart(w, " ");
-  const hr = "-".repeat(62);
-  const eq = "=".repeat(62);
+  const hr = "-".repeat(SLIP_WIDTH);
+  const eq = "=".repeat(SLIP_WIDTH);
   const renderedRows = rows
     .map((r) => `${txt(r.lotNo, 12)}${num(r.bags, 4)} ${num(r.qty, 9)} ${num(r.rate, 9)} ${num(money(r.amount || 0), 14)}`)
     .join("\n");
-  const invoiceText = `               M
-            BILL
+  const invoiceText = `${centerLine("Z")}
+${centerLine("BILL")}
 ${customerLabel.padEnd(36)}No. ${displayInvoiceNo}
 ${"".padEnd(36)}Dt. ${invoice?.date || ""}${invoice?.time ? ` ${invoice.time}` : ""}
 ${hr}
@@ -67,16 +75,18 @@ ${eq}`;
               height: 100%;
               display: flex;
               align-items: flex-start;
-              justify-content: flex-start;
+              justify-content: center;
               overflow: hidden;
+              min-width: 0;
             }
             .slip {
-              width: 100%;
+              width: 62ch;
               max-width: 100%;
               font-family: "Courier New", monospace;
               color: #000;
               margin: 0;
               display: block;
+              flex-shrink: 0;
             }
             .divider {
               width: 100%;
@@ -86,6 +96,7 @@ ${eq}`;
             pre {
               margin: 0;
               width: 100%;
+              text-align: left;
               font-size: 4.3mm;
               line-height: 1.32;
               white-space: pre;
@@ -184,7 +195,7 @@ ${eq}`;
       <style>{`@media print { .invoice-actions { display: none !important; } }`}</style>
       <div
         ref={ref}
-        className="w-[360px] max-w-full overflow-hidden rounded border border-slate-300 bg-white p-3 text-black sm:p-4"
+        className="mx-auto w-[62ch] max-w-full overflow-hidden rounded border border-slate-300 bg-white p-3 text-black sm:p-4"
         style={{ fontFamily: "Courier New, monospace" }}
       >
         <pre className="text-[14px] leading-5 sm:text-[16px] sm:leading-6">
