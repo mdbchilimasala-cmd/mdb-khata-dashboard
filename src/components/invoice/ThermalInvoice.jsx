@@ -1,6 +1,46 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef } from "react";
 import { jsPDF } from "jspdf";
 import { money } from "../../utils/billing";
+
+/** Split a monospace line into plain text vs money tokens (en-IN style like 5,000.00). */
+function splitLineAmountParts(line) {
+  const AMOUNT_RE = /\d{1,3}(?:,\d{3})*\.\d{2}|\d+\.\d{2}/g;
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = AMOUNT_RE.exec(line)) !== null) {
+    if (m.index > last) parts.push({ kind: "text", s: line.slice(last, m.index) });
+    parts.push({ kind: "amt", s: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) parts.push({ kind: "text", s: line.slice(last) });
+  if (parts.length === 0) parts.push({ kind: "text", s: line });
+  return parts;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function invoiceTextToPrintHtml(text) {
+  return text
+    .split("\n")
+    .map((line) => {
+      const inner = splitLineAmountParts(line)
+        .map((p) =>
+          p.kind === "amt"
+            ? `<span class="amt">${escapeHtml(p.s)}</span>`
+            : escapeHtml(p.s),
+        )
+        .join("");
+      return `<div class="line">${inner}</div>`;
+    })
+    .join("");
+}
 
 export function ThermalInvoice({ invoice, printSignal = 0 }) {
   const ref = useRef(null);
@@ -50,6 +90,8 @@ Grand Total ...                            ${money(grandTotal)}
 Final Bal ...                              ${money(finalBalance)}
 ${eq}`;
 
+  const slipHtml = useMemo(() => invoiceTextToPrintHtml(invoiceText), [invoiceText]);
+
   const printInvoiceOnly = useCallback(() => {
     if (!ref.current) return;
     const win = window.open("", "_blank", "width=420,height=800");
@@ -84,6 +126,7 @@ ${eq}`;
               max-width: 100%;
               font-family: "Courier New", monospace;
               color: #000;
+              font-weight: 600;
               margin: 0;
               display: block;
               flex-shrink: 0;
@@ -93,23 +136,30 @@ ${eq}`;
               border-top: 1px dashed #111;
               align-self: center;
             }
-            pre {
+            .line {
               margin: 0;
               width: 100%;
               text-align: left;
-              font-size: 4.3mm;
+              color: #000;
+              font-size: 3.4mm;
               line-height: 1.32;
               white-space: pre;
               display: block;
+              font-weight: 700;
               font-family: "Courier New", monospace;
+            }
+            .line .amt {
+              font-weight: 900;
+              font-size: 1.18em;
+              letter-spacing: 0.02em;
             }
           </style>
         </head>
         <body>
           <div class="page">
-            <div class="copy"><div class="slip"><pre>${invoiceText}</pre></div></div>
+            <div class="copy"><div class="slip">${slipHtml}</div></div>
             <div class="divider"></div>
-            <div class="copy"><div class="slip"><pre>${invoiceText}</pre></div></div>
+            <div class="copy"><div class="slip">${slipHtml}</div></div>
           </div>
           <script>
             window.onload = function () {
@@ -121,7 +171,18 @@ ${eq}`;
       </html>
     `);
     win.document.close();
-  }, [displayInvoiceNo, invoiceText]);
+  }, [displayInvoiceNo, slipHtml]);
+
+  const drawPdfLineWithAmounts = (pdf, line, x, y, baseSize, amtSize) => {
+    let xPos = x;
+    splitLineAmountParts(line).forEach((p) => {
+      const isAmt = p.kind === "amt";
+      pdf.setFont("courier", "bold");
+      pdf.setFontSize(isAmt ? amtSize : baseSize);
+      pdf.text(p.s, xPos, y);
+      xPos += pdf.getTextWidth(p.s);
+    });
+  };
 
   const buildInvoicePdfBlob = useCallback(() => {
     const pdf = new jsPDF({
@@ -130,19 +191,19 @@ ${eq}`;
       format: "a4",
     });
 
-    pdf.setFont("courier", "normal");
-    pdf.setFontSize(10);
     const lines = String(invoiceText).split("\n");
     const marginLeft = 42;
     const topStart = 52;
     const bottomStart = 450;
-    const lineHeight = 11.5;
+    const lineHeight = 12;
     const dividerY = 410;
     const dividerEndX = 560;
+    const baseSize = 10.5;
+    const amtSize = 12.5;
 
     // Top copy
     lines.forEach((line, i) => {
-      pdf.text(line, marginLeft, topStart + i * lineHeight);
+      drawPdfLineWithAmounts(pdf, line, marginLeft, topStart + i * lineHeight, baseSize, amtSize);
     });
 
     // Divider line between copies (similar to print dashed separator)
@@ -152,7 +213,7 @@ ${eq}`;
 
     // Bottom copy
     lines.forEach((line, i) => {
-      pdf.text(line, marginLeft, bottomStart + i * lineHeight);
+      drawPdfLineWithAmounts(pdf, line, marginLeft, bottomStart + i * lineHeight, baseSize, amtSize);
     });
 
     return pdf.output("blob");
@@ -195,12 +256,30 @@ ${eq}`;
       <style>{`@media print { .invoice-actions { display: none !important; } }`}</style>
       <div
         ref={ref}
-        className="mx-auto w-[62ch] max-w-full overflow-hidden rounded border border-slate-300 bg-white p-3 text-black sm:p-4"
+        className="mx-auto w-[62ch] max-w-full overflow-hidden rounded border border-black bg-white p-3 text-black sm:p-4"
         style={{ fontFamily: "Courier New, monospace" }}
       >
-        <pre className="text-[14px] leading-5 sm:text-[16px] sm:leading-6">
-{invoiceText}
-        </pre>
+        <div
+          className="text-[14px] font-bold leading-[1.32] text-black sm:text-[16px]"
+          style={{ fontFamily: "Courier New, monospace" }}
+        >
+          {invoiceText.split("\n").map((line, i) => (
+            <div key={i} className="whitespace-pre">
+              {splitLineAmountParts(line).map((p, j) =>
+                p.kind === "amt" ? (
+                  <span
+                    key={j}
+                    className="font-black text-[1.08em] tracking-wide text-black sm:text-[1.14em]"
+                  >
+                    {p.s}
+                  </span>
+                ) : (
+                  <Fragment key={j}>{p.s}</Fragment>
+                ),
+              )}
+            </div>
+          ))}
+        </div>
       </div>
       <div className="invoice-actions mt-3 flex flex-wrap gap-2">
         <button className="rounded bg-black px-3 py-2 text-white" onClick={printInvoiceOnly}>
