@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { jsPDF } from "jspdf";
 import { money } from "../../utils/billing";
 
 export function ThermalInvoice({ invoice, printSignal = 0 }) {
@@ -111,6 +112,68 @@ ${eq}`;
     win.document.close();
   }, [displayInvoiceNo, invoiceText]);
 
+  const buildInvoicePdfBlob = useCallback(() => {
+    const pdf = new jsPDF({
+      orientation: "portrait",
+      unit: "pt",
+      format: "a4",
+    });
+
+    pdf.setFont("courier", "normal");
+    pdf.setFontSize(10);
+    const lines = String(invoiceText).split("\n");
+    const marginLeft = 42;
+    const topStart = 52;
+    const bottomStart = 450;
+    const lineHeight = 11.5;
+    const dividerY = 410;
+    const dividerEndX = 560;
+
+    // Top copy
+    lines.forEach((line, i) => {
+      pdf.text(line, marginLeft, topStart + i * lineHeight);
+    });
+
+    // Divider line between copies (similar to print dashed separator)
+    pdf.setLineDashPattern([4, 3], 0);
+    pdf.line(marginLeft, dividerY, dividerEndX, dividerY);
+    pdf.setLineDashPattern([], 0);
+
+    // Bottom copy
+    lines.forEach((line, i) => {
+      pdf.text(line, marginLeft, bottomStart + i * lineHeight);
+    });
+
+    return pdf.output("blob");
+  }, [invoiceText]);
+
+  const shareInvoicePdf = useCallback(async () => {
+    const blob = buildInvoicePdfBlob();
+    const filename = `Invoice-${displayInvoiceNo || "invoice"}.pdf`;
+    const file = new File([blob], filename, { type: "application/pdf" });
+
+    if (navigator.share && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({
+          title: `Invoice ${displayInvoiceNo || ""}`.trim(),
+          files: [file],
+        });
+        return;
+      } catch {
+        // User cancelled or share failed; fallback to download.
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }, [buildInvoicePdfBlob, displayInvoiceNo]);
+
   useEffect(() => {
     if (!printSignal || !invoice?.id) return;
     printInvoiceOnly();
@@ -131,6 +194,9 @@ ${eq}`;
       <div className="invoice-actions mt-3 flex flex-wrap gap-2">
         <button className="rounded bg-black px-3 py-2 text-white" onClick={printInvoiceOnly}>
           Print
+        </button>
+        <button className="rounded border px-3 py-2" onClick={shareInvoicePdf}>
+          Share PDF
         </button>
       </div>
     </div>
